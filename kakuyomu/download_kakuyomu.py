@@ -27,11 +27,13 @@ def upload_history_to_drive():
     ], check=True)
 
 def read_history():
+    # LOCAL_HISTORY_PATHがディレクトリでないことを確認
     if os.path.isdir(LOCAL_HISTORY_PATH):
         raise IsADirectoryError(f"{LOCAL_HISTORY_PATH}はディレクトリです。")
 
     history = {}
-    if os.path.exists(LOCAL_HISTORY_PATH):
+    # LOCAL_HISTORY_PATHがファイルであれば読み込む
+    if os.path.isfile(LOCAL_HISTORY_PATH):
         with open(LOCAL_HISTORY_PATH, encoding="utf-8") as f:
             for line in f:
                 url, last = line.strip().split(" | ")
@@ -39,6 +41,7 @@ def read_history():
     return history
 
 def write_history(history):
+    # 履歴ファイルを上書きで書き込む
     with open(LOCAL_HISTORY_PATH, "w", encoding="utf-8") as f:
         for url, last in history.items():
             f.write(f"{url} | {last}\n")
