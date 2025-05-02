@@ -1,113 +1,112 @@
 import os
-import re
-import time
 import requests
-import subprocess
 from bs4 import BeautifulSoup
+import re
+import subprocess
 
-BASE_URL = "https://kakuyomu.jp"
-DOWNLOAD_DIR = "/tmp/kakuyomu_dl"
-HISTORY_FILE = "kakuyomu/カクヨムダウンロード経歴.txt"  # ローカルに保存されるように変更
-REMOTE_HISTORY_FILE = "drive:/カクヨムダウンロード経歴.txt"
-NOVEL_LIST_FILE = "kakuyomu/カクヨム.txt"
+BASE_URL = 'https://kakuyomu.jp'
+HISTORY_FILE = 'カクヨムダウンロード経歴.txt'
+LOCAL_HISTORY_PATH = f'/tmp/{HISTORY_FILE}'  # ローカル経歴ファイルのパス
+REMOTE_HISTORY_PATH = f'drive:/{HISTORY_FILE}'  # Google Driveの経歴ファイルのパス
 
-os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+# URL一覧の読み込み（スクリプトと同じディレクトリにあるファイルを参照）
+script_dir = os.path.dirname(__file__)
+url_file_path = os.path.join(script_dir, 'カクヨム.txt')
 
-# Google Driveからhistoryファイルをダウンロード
-def download_history_from_drive():
-    subprocess.run([
-        "rclone", "copy", REMOTE_HISTORY_FILE, HISTORY_FILE,
-        "--progress"
-    ], check=True)
+def fetch_url(url):
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    return requests.get(url, headers=headers)
 
-# Google Driveにhistoryファイルをアップロード
-def upload_history_to_drive():
-    subprocess.run([
-        "rclone", "move", HISTORY_FILE, REMOTE_HISTORY_FILE,
-        "--progress"
-    ], check=True)
-
-def read_history():
-    # HISTORY_FILEがディレクトリでないか確認
-    if os.path.isdir(HISTORY_FILE):
-        raise IsADirectoryError(f"{HISTORY_FILE}はディレクトリです。")
+def load_history():
+    if not os.path.exists(LOCAL_HISTORY_PATH):
+        subprocess.run(['rclone', 'copyto', REMOTE_HISTORY_PATH, LOCAL_HISTORY_PATH], check=False)
 
     history = {}
-    if os.path.exists(HISTORY_FILE):
-        with open(HISTORY_FILE, encoding="utf-8") as f:
+    if os.path.exists(LOCAL_HISTORY_PATH):
+        with open(LOCAL_HISTORY_PATH, 'r', encoding='utf-8') as f:
             for line in f:
-                url, last = line.strip().split(" | ")
-                history[url] = int(last)
+                match = re.match(r'(https?://[^\s|]+)\s*\|\s*(\d+)', line.strip())
+                if match:
+                    url, last = match.groups()
+                    history[url.rstrip('/')] = int(last)
     return history
 
-def write_history(history):
-    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+def save_history(history):
+    with open(LOCAL_HISTORY_PATH, 'w', encoding='utf-8') as f:
         for url, last in history.items():
-            f.write(f"{url} | {last}\n")
+            f.write(f'{url}  |  {last}\n')
+    subprocess.run(['rclone', 'copyto', LOCAL_HISTORY_PATH, REMOTE_HISTORY_PATH], check=True)
 
-def get_episode_links(novel_url):
-    res = requests.get(novel_url)
-    soup = BeautifulSoup(res.text, "html.parser")
-    links = soup.select("a.widget-toc-episode")
-    return [BASE_URL + a["href"] for a in links]
+# 履歴を読み込み
+history = load_history()
 
-def download_episode(url):
-    res = requests.get(url)
-    soup = BeautifulSoup(res.text, "html.parser")
-    title = soup.select_one("h1.widget-episodeTitle").text.strip()
-    content = soup.select_one("div.widget-episodeBody").decode_contents()
-    episode_id = url.split("/")[-1]
-    return f"# {title}\n\n{content}", episode_id
+# 小説URLのリストを読み込み
+with open(url_file_path, 'r', encoding='utf-8') as f:
+    urls = [line.strip().rstrip('/') for line in f if line.strip().startswith('http')]
 
-def sanitize_filename(name):
-    return re.sub(r'[\\/*?:"<>|]', "", name)
+for novel_url in urls:
+    try:
+        print(f'\n--- 処理開始: {novel_url} ---')
+        url = novel_url
+        sublist = []
 
-def get_novel_title(novel_url):
-    res = requests.get(novel_url)
-    soup = BeautifulSoup(res.text, "html.parser")
-    return soup.select_one("h1.widget-title").text.strip()
+        # ページ分割対応
+        while True:
+            res = fetch_url(url)
+            soup = BeautifulSoup(res.text, 'html.parser')
+            title_text = soup.find('title').get_text()
+            sublist += soup.select('.p-eplist__sublist .p-eplist__subtitle')
+            next_page = soup.select_one('.c-pager__item--next')
+            if next_page and next_page.get('href'):
+                url = f'{BASE_URL}{next_page.get("href")}'
+            else:
+                break
 
-def main():
-    download_history_from_drive()  # Google Driveから履歴をダウンロード
-    history = read_history()
+        # タイトルのクリーンアップ
+        for char in ['<', '>', ':', '"', '/', '\\', '|', '?', '*']:
+            title_text = title_text.replace(char, '')
+        title_text = title_text.strip()
 
-    with open(NOVEL_LIST_FILE, encoding="utf-8") as f:
-        novels = [line.strip() for line in f if line.strip()]
+        # ダウンロード開始位置
+        download_from = history.get(novel_url, 0)
+        os.makedirs(f'/tmp/kakuyomu_dl/{title_text}', exist_ok=True)
 
-    for novel_url in novels:
-        print(f"--- 処理開始: {novel_url} ---")
-        episode_links = get_episode_links(novel_url)
-        last_downloaded = history.get(novel_url, 0)  # 履歴から最終話を取得
-        to_download = episode_links[last_downloaded:]  # 最終話以降をダウンロード対象にする
+        sub_len = len(sublist)
+        new_max = download_from
 
-        if not to_download:
-            print("  → 新しい話はありません。スキップします。")
-            continue
+        for i, sub in enumerate(sublist):
+            if i + 1 <= download_from:
+                continue
 
-        novel_title = sanitize_filename(get_novel_title(novel_url))
-        novel_dir = os.path.join(DOWNLOAD_DIR, novel_title)
-        os.makedirs(novel_dir, exist_ok=True)
+            sub_title = sub.text.strip()
+            link = sub.get('href')
+            file_name = f'{i+1:03d}.txt'
+            folder_num = (i // 999) + 1
+            folder_name = f'{folder_num:03d}'
+            folder_path = f'/tmp/kakuyomu_dl/{title_text}/{folder_name}'
+            os.makedirs(folder_path, exist_ok=True)
+            file_path = f'{folder_path}/{file_name}'
 
-        for i, episode_url in enumerate(to_download, 1):
-            content, eid = download_episode(episode_url)
-            with open(os.path.join(novel_dir, f"{last_downloaded+i:04}_{eid}.html"), "w", encoding="utf-8") as f:
-                f.write(content)
+            # 本文の取得
+            res = fetch_url(f'{BASE_URL}{link}')
+            soup = BeautifulSoup(res.text, 'html.parser')
+            sub_body = soup.select_one('.p-novel__body')
+            sub_body_text = sub_body.get_text() if sub_body else '[本文が取得できませんでした]'
 
-            if i % 300 == 0:
-                print("  → 300話ごとに1分待機...")
-                time.sleep(60)
+            with open(file_path, 'w', encoding='UTF-8') as f:
+                f.write(f'{sub_title}\n\n{sub_body_text}')
 
-        history[novel_url] = last_downloaded + len(to_download)  # 新しい話数を履歴に更新
-        print(f"  → {len(to_download)}話ダウンロード完了")
+            print(f'{file_name} downloaded in folder {folder_name} ({i+1}/{sub_len})')
+            new_max = i + 1
 
-    write_history(history)  # 履歴ファイルを更新
-    upload_history_to_drive()  # 処理後に履歴をGoogle Driveにアップロード
+        history[novel_url] = new_max
 
-    # Google Driveへアップロード
-    subprocess.run([
-        "rclone", "copy", DOWNLOAD_DIR, "drive:/kakuyomu_dl",
-        "--transfers=4", "--checkers=8", "--fast-list"
-    ], check=True)
+    except Exception as e:
+        print(f'エラー発生: {novel_url} → {e}')
+        continue
 
-if __name__ == "__main__":
-    main()
+# 履歴を保存
+save_history(history)
+
+# Google Driveへアップロード
+subprocess.run(['rclone', 'copy', '/tmp/kakuyomu_dl', 'drive:', '--transfers=4', '--checkers=8', '--fast-list'], check=True)
