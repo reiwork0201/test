@@ -15,32 +15,30 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 # Google Driveからhistoryファイルをダウンロード
 def download_history_from_drive():
     subprocess.run([
-        "rclone", "copy", "drive:/カクヨムダウンロード経歴.txt", LOCAL_HISTORY_PATH,
+        "rclone", "copyto", "drive:/カクヨムダウンロード経歴.txt", LOCAL_HISTORY_PATH,
         "--progress"
     ], check=True)
 
 # Google Driveにhistoryファイルをアップロード
 def upload_history_to_drive():
     subprocess.run([
-        "rclone", "move", LOCAL_HISTORY_PATH, "drive:/カクヨムダウンロード経歴.txt",
+        "rclone", "copyto", LOCAL_HISTORY_PATH, "drive:/カクヨムダウンロード経歴.txt",
         "--progress"
     ], check=True)
 
 def read_history():
-    # ディレクトリとして存在していた場合は削除
     if os.path.isdir(LOCAL_HISTORY_PATH):
         print(f"{LOCAL_HISTORY_PATH} はディレクトリとして存在していたため削除します。")
-        os.rmdir(LOCAL_HISTORY_PATH)
-
-    # ファイルが存在しない場合は空ファイルを作成
-    if not os.path.exists(LOCAL_HISTORY_PATH):
-        with open(LOCAL_HISTORY_PATH, "w", encoding="utf-8") as f:
-            pass
+        # ディレクトリを削除（中身が空であることを前提とする）
+        try:
+            os.rmdir(LOCAL_HISTORY_PATH)
+        except OSError:
+            raise IsADirectoryError(f"{LOCAL_HISTORY_PATH} はディレクトリであり、削除できませんでした。中身がある可能性があります。")
 
     history = {}
-    with open(LOCAL_HISTORY_PATH, encoding="utf-8") as f:
-        for line in f:
-            if " | " in line:
+    if os.path.exists(LOCAL_HISTORY_PATH):
+        with open(LOCAL_HISTORY_PATH, encoding="utf-8") as f:
+            for line in f:
                 url, last = line.strip().split(" | ")
                 history[url] = int(last)
     return history
