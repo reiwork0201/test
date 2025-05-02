@@ -8,6 +8,7 @@ from bs4 import BeautifulSoup
 BASE_URL = "https://kakuyomu.jp"
 DOWNLOAD_DIR = "/tmp/kakuyomu_dl"
 LOCAL_HISTORY_PATH = "/tmp/カクヨムダウンロード経歴.txt"
+REMOTE_HISTORY_PATH = "drive:/カクヨムダウンロード経歴.txt"
 NOVEL_LIST_FILE = "kakuyomu/カクヨム.txt"
 
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
@@ -15,26 +16,21 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 # Google Driveからhistoryファイルをダウンロード
 def download_history_from_drive():
     subprocess.run([
-        "rclone", "copyto", "drive:/カクヨムダウンロード経歴.txt", LOCAL_HISTORY_PATH,
+        "rclone", "copy", REMOTE_HISTORY_PATH, "/tmp/",
         "--progress"
     ], check=True)
 
 # Google Driveにhistoryファイルをアップロード
 def upload_history_to_drive():
     subprocess.run([
-        "rclone", "copyto", LOCAL_HISTORY_PATH, "drive:/カクヨムダウンロード経歴.txt",
+        "rclone", "move", LOCAL_HISTORY_PATH, REMOTE_HISTORY_PATH,
         "--progress"
     ], check=True)
 
 def read_history():
     if os.path.isdir(LOCAL_HISTORY_PATH):
         print(f"{LOCAL_HISTORY_PATH} はディレクトリとして存在していたため削除します。")
-        # ディレクトリを削除（中身が空であることを前提とする）
-        try:
-            os.rmdir(LOCAL_HISTORY_PATH)
-        except OSError:
-            raise IsADirectoryError(f"{LOCAL_HISTORY_PATH} はディレクトリであり、削除できませんでした。中身がある可能性があります。")
-
+        os.rmdir(LOCAL_HISTORY_PATH)  # 空でなければエラーになる
     history = {}
     if os.path.exists(LOCAL_HISTORY_PATH):
         with open(LOCAL_HISTORY_PATH, encoding="utf-8") as f:
@@ -52,8 +48,7 @@ def get_episode_links(novel_url):
     res = requests.get(novel_url)
     soup = BeautifulSoup(res.text, "html.parser")
     links = soup.select("a.widget-toc-episode")
-    links_sorted = sorted(links, key=lambda a: a["href"])
-    return [BASE_URL + a["href"] for a in links_sorted]
+    return [BASE_URL + a["href"] for a in links]  # ソート削除！目次通りに並んでいる
 
 def download_episode(url):
     res = requests.get(url)
