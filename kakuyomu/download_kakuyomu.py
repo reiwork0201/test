@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 
 BASE_URL = "https://kakuyomu.jp"
 DOWNLOAD_DIR = "/tmp/kakuyomu_dl"
-HISTORY_FILE = "カクヨムダウンロード経歴.txt"  # /tmp/ディレクトリに保存されるように変更
+HISTORY_FILE = "/tmp/カクヨムダウンロード経歴.txt"  # /tmp/ディレクトリに保存されるように変更
 NOVEL_LIST_FILE = "kakuyomu/カクヨム.txt"
 
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
@@ -27,9 +27,9 @@ def upload_history_to_drive():
     ], check=True)
 
 def read_history():
-    # HISTORY_FILEがディレクトリではないか確認
-    if os.path.isdir(HISTORY_FILE):
-        raise IsADirectoryError(f"{HISTORY_FILE}はディレクトリです。")
+    # HISTORY_FILEがディレクトリでないか確認
+    if os.path.isdir(HISTORY_FILE):  # この部分が誤っていた場合、ディレクトリエラーになる
+        raise IsADirectoryError(f"{HISTORY_FILE}はディレクトリではなくファイルです。")
 
     history = {}
     if os.path.exists(HISTORY_FILE):
@@ -37,13 +37,9 @@ def read_history():
             for line in f:
                 url, last = line.strip().split(" | ")
                 history[url] = int(last)
-    else:
-        # 履歴ファイルがない場合は空の辞書を返す
-        print(f"{HISTORY_FILE}が見つからなかったため、空の履歴を作成します。")
     return history
 
 def write_history(history):
-    # 履歴ファイルの書き込み
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         for url, last in history.items():
             f.write(f"{url} | {last}\n")
