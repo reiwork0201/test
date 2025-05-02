@@ -27,7 +27,7 @@ def upload_history_to_drive():
     ], check=True)
 
 def read_history():
-    # HISTORY_FILEがディレクトリでないか確認
+    # HISTORY_FILEがディレクトリではないか確認
     if os.path.isdir(HISTORY_FILE):
         raise IsADirectoryError(f"{HISTORY_FILE}はディレクトリです。")
 
@@ -37,9 +37,13 @@ def read_history():
             for line in f:
                 url, last = line.strip().split(" | ")
                 history[url] = int(last)
+    else:
+        # 履歴ファイルがない場合は空の辞書を返す
+        print(f"{HISTORY_FILE}が見つからなかったため、空の履歴を作成します。")
     return history
 
 def write_history(history):
+    # 履歴ファイルの書き込み
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         for url, last in history.items():
             f.write(f"{url} | {last}\n")
