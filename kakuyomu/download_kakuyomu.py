@@ -5,108 +5,89 @@ import requests
 import subprocess
 from bs4 import BeautifulSoup
 
-BASE_URL = "https://kakuyomu.jp"
-DOWNLOAD_DIR = "/tmp/kakuyomu_dl"
 LOCAL_HISTORY_PATH = "/tmp/カクヨムダウンロード経歴.txt"
 REMOTE_HISTORY_PATH = "drive:/カクヨムダウンロード経歴.txt"
-NOVEL_LIST_FILE = "kakuyomu/カクヨム.txt"
+DOWNLOAD_DIR = "/tmp/novel_dl"
 
-os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-
-# Google Driveからhistoryファイルをダウンロード
-def download_history_from_drive():
-    subprocess.run([
-        "rclone", "copy", REMOTE_HISTORY_PATH, "/tmp/",
-        "--progress"
-    ], check=True)
-
-# Google Driveにhistoryファイルをアップロード
 def upload_history_to_drive():
     subprocess.run([
-        "rclone", "move", LOCAL_HISTORY_PATH, REMOTE_HISTORY_PATH,
+        "rclone", "copyto", LOCAL_HISTORY_PATH, REMOTE_HISTORY_PATH,
         "--progress"
     ], check=True)
+    os.remove(LOCAL_HISTORY_PATH)  # 元ファイルを削除してmoveと同じ挙動に
 
 def read_history():
     if os.path.isdir(LOCAL_HISTORY_PATH):
         print(f"{LOCAL_HISTORY_PATH} はディレクトリとして存在していたため削除します。")
-        os.rmdir(LOCAL_HISTORY_PATH)  # 空でなければエラーになる
+        os.rmdir(LOCAL_HISTORY_PATH)
+    if not os.path.exists(LOCAL_HISTORY_PATH):
+        return {}
+    with open(LOCAL_HISTORY_PATH, "r", encoding="utf-8") as f:
+        lines = f.read().splitlines()
     history = {}
-    if os.path.exists(LOCAL_HISTORY_PATH):
-        with open(LOCAL_HISTORY_PATH, encoding="utf-8") as f:
-            for line in f:
-                url, last = line.strip().split(" | ")
-                history[url] = int(last)
+    for line in lines:
+        if " | " in line:
+            url, last_count = line.split(" | ")
+            history[url.strip()] = int(last_count.strip())
     return history
 
 def write_history(history):
     with open(LOCAL_HISTORY_PATH, "w", encoding="utf-8") as f:
-        for url, last in history.items():
-            f.write(f"{url} | {last}\n")
+        for url, count in history.items():
+            f.write(f"{url} | {count}\n")
 
-def get_episode_links(novel_url):
-    res = requests.get(novel_url)
+def fetch_episode_urls(work_url):
+    res = requests.get(work_url)
+    res.raise_for_status()
     soup = BeautifulSoup(res.text, "html.parser")
-    links = soup.select("a.widget-toc-episode")
-    return [BASE_URL + a["href"] for a in links]  # ソート削除！目次通りに並んでいる
+    episode_links = soup.select("a.widget-episode-title")
+    return [f"https://kakuyomu.jp{a['href']}" for a in episode_links]
 
-def download_episode(url):
-    res = requests.get(url)
+def fetch_episode_content(episode_url):
+    res = requests.get(episode_url)
+    res.raise_for_status()
     soup = BeautifulSoup(res.text, "html.parser")
-    title = soup.select_one("h1.widget-episodeTitle").text.strip()
-    content = soup.select_one("div.widget-episodeBody").decode_contents()
-    episode_id = url.split("/")[-1]
-    return f"# {title}\n\n{content}", episode_id
+    title = soup.select_one("h1").text.strip()
+    body = soup.select_one("div#contentMain-inner")
+    paragraphs = body.select("p")
+    text = "\n".join(p.text.strip() for p in paragraphs)
+    return title, text
 
-def sanitize_filename(name):
-    return re.sub(r'[\\/*?:"<>|]', "", name)
+def download_new_episodes(work_url, last_downloaded_count):
+    episode_urls = fetch_episode_urls(work_url)
+    new_urls = episode_urls[last_downloaded_count:]
+    if not new_urls:
+        print(f"  → 新しい話はありません。スキップします。")
+        return last_downloaded_count
 
-def get_novel_title(novel_url):
-    res = requests.get(novel_url)
-    soup = BeautifulSoup(res.text, "html.parser")
-    return soup.select_one("h1.widget-title").text.strip()
+    work_id = work_url.rstrip("/").split("/")[-1]
+    save_dir = os.path.join(DOWNLOAD_DIR, work_id)
+    os.makedirs(save_dir, exist_ok=True)
+
+    for idx, url in enumerate(new_urls, start=last_downloaded_count + 1):
+        print(f"  → 第{idx}話 をダウンロード中: {url}")
+        title, content = fetch_episode_content(url)
+        with open(os.path.join(save_dir, f"{idx:04}_{title}.txt"), "w", encoding="utf-8") as f:
+            f.write(f"{title}\n\n{content}")
+        time.sleep(1)  # アクセス間隔
+
+    return len(episode_urls)
 
 def main():
-    download_history_from_drive()
+    os.makedirs(DOWNLOAD_DIR, exist_ok=True)
     history = read_history()
 
-    with open(NOVEL_LIST_FILE, encoding="utf-8") as f:
-        novels = [line.strip() for line in f if line.strip()]
+    with open("kakuyomu/カクヨム.txt", "r", encoding="utf-8") as f:
+        urls = [line.strip() for line in f if line.strip()]
 
-    for novel_url in novels:
-        print(f"--- 処理開始: {novel_url} ---")
-        episode_links = get_episode_links(novel_url)
-        last_downloaded = history.get(novel_url, 0)
-        total_episodes = len(episode_links)
-
-        if last_downloaded >= total_episodes:
-            print("  → 新しい話はありません。スキップします。")
-            continue
-
-        to_download = episode_links[last_downloaded:]
-        novel_title = sanitize_filename(get_novel_title(novel_url))
-        novel_dir = os.path.join(DOWNLOAD_DIR, novel_title)
-        os.makedirs(novel_dir, exist_ok=True)
-
-        for i, episode_url in enumerate(to_download, 1):
-            content, eid = download_episode(episode_url)
-            with open(os.path.join(novel_dir, f"{last_downloaded+i:04}_{eid}.html"), "w", encoding="utf-8") as f:
-                f.write(content)
-
-            if i % 300 == 0:
-                print("  → 300話ごとに1分待機...")
-                time.sleep(60)
-
-        history[novel_url] = last_downloaded + len(to_download)
-        print(f"  → {len(to_download)}話ダウンロード完了")
+    for url in urls:
+        print(f"--- 処理開始: {url} ---")
+        last = history.get(url, 0)
+        latest = download_new_episodes(url, last)
+        history[url] = latest
 
     write_history(history)
     upload_history_to_drive()
-
-    subprocess.run([
-        "rclone", "copy", DOWNLOAD_DIR, "drive:/kakuyomu_dl",
-        "--transfers=4", "--checkers=8", "--fast-list"
-    ], check=True)
 
 if __name__ == "__main__":
     main()
