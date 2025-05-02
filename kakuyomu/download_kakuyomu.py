@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 
 BASE_URL = "https://kakuyomu.jp"
 DOWNLOAD_DIR = "/tmp/kakuyomu_dl"
-HISTORY_FILE = "/tmp/カクヨムダウンロード経歴.txt"
+LOCAL_HISTORY_PATH = "/tmp/カクヨムダウンロード経歴.txt"  # 履歴ファイルの新しいパス
 NOVEL_LIST_FILE = "kakuyomu/カクヨム.txt"
 
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
@@ -15,31 +15,31 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 # Google Driveからhistoryファイルをダウンロード
 def download_history_from_drive():
     subprocess.run([
-        "rclone", "copy", "drive:/カクヨムダウンロード経歴.txt", HISTORY_FILE,
+        "rclone", "copy", "drive:/カクヨムダウンロード経歴.txt", LOCAL_HISTORY_PATH,
         "--progress"
     ], check=True)
 
 # Google Driveにhistoryファイルをアップロード
 def upload_history_to_drive():
     subprocess.run([
-        "rclone", "move", HISTORY_FILE, "drive:/カクヨムダウンロード経歴.txt",
+        "rclone", "move", LOCAL_HISTORY_PATH, "drive:/カクヨムダウンロード経歴.txt",
         "--progress"
     ], check=True)
 
 def read_history():
-    if os.path.isdir(HISTORY_FILE):
-        raise IsADirectoryError(f"{HISTORY_FILE}はディレクトリです。")
+    if os.path.isdir(LOCAL_HISTORY_PATH):
+        raise IsADirectoryError(f"{LOCAL_HISTORY_PATH}はディレクトリです。")
 
     history = {}
-    if os.path.exists(HISTORY_FILE):
-        with open(HISTORY_FILE, encoding="utf-8") as f:
+    if os.path.exists(LOCAL_HISTORY_PATH):
+        with open(LOCAL_HISTORY_PATH, encoding="utf-8") as f:
             for line in f:
                 url, last = line.strip().split(" | ")
                 history[url] = int(last)
     return history
 
 def write_history(history):
-    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+    with open(LOCAL_HISTORY_PATH, "w", encoding="utf-8") as f:
         for url, last in history.items():
             f.write(f"{url} | {last}\n")
 
