@@ -7,12 +7,12 @@ from bs4 import BeautifulSoup
 
 BASE_URL = "https://kakuyomu.jp"
 DOWNLOAD_DIR = "/tmp/kakuyomu_dl"
-LOCAL_HISTORY_PATH = "/tmp/カクヨムダウンロード経歴.txt"  # 履歴ファイルの新しいパス
+LOCAL_HISTORY_PATH = "/tmp/カクヨムダウンロード経歴.txt"  # 履歴ファイルを/tmp/に保存
 NOVEL_LIST_FILE = "kakuyomu/カクヨム.txt"
 
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# Google Driveからhistoryファイルをダウンロード
+# Google Driveからhistoryファイルを/tmpにダウンロード
 def download_history_from_drive():
     subprocess.run([
         "rclone", "copy", "drive:/カクヨムダウンロード経歴.txt", LOCAL_HISTORY_PATH,
@@ -31,9 +31,13 @@ def read_history():
     if os.path.isdir(LOCAL_HISTORY_PATH):
         raise IsADirectoryError(f"{LOCAL_HISTORY_PATH}はディレクトリです。")
 
+    # 履歴ファイルが存在しない場合に新しく作成
+    if not os.path.exists(LOCAL_HISTORY_PATH):
+        with open(LOCAL_HISTORY_PATH, "w", encoding="utf-8") as f:
+            pass  # 空のファイルを作成
+
     history = {}
-    # LOCAL_HISTORY_PATHがファイルであれば読み込む
-    if os.path.isfile(LOCAL_HISTORY_PATH):
+    if os.path.isfile(LOCAL_HISTORY_PATH):  # ファイルとして存在する場合のみ読み込み
         with open(LOCAL_HISTORY_PATH, encoding="utf-8") as f:
             for line in f:
                 url, last = line.strip().split(" | ")
@@ -41,7 +45,7 @@ def read_history():
     return history
 
 def write_history(history):
-    # 履歴ファイルを上書きで書き込む
+    # 履歴ファイルに書き込む
     with open(LOCAL_HISTORY_PATH, "w", encoding="utf-8") as f:
         for url, last in history.items():
             f.write(f"{url} | {last}\n")
@@ -70,7 +74,7 @@ def get_novel_title(novel_url):
     return soup.select_one("h1.widget-title").text.strip()
 
 def main():
-    download_history_from_drive()
+    download_history_from_drive()  # Google Driveから履歴ファイルをダウンロード
     history = read_history()
 
     with open(NOVEL_LIST_FILE, encoding="utf-8") as f:
@@ -103,8 +107,8 @@ def main():
         history[novel_url] = last_downloaded + len(to_download)
         print(f"  → {len(to_download)}話ダウンロード完了")
 
-    write_history(history)
-    upload_history_to_drive()
+    write_history(history)  # 履歴ファイルを書き込む
+    upload_history_to_drive()  # Google Driveに履歴ファイルをアップロード
 
     subprocess.run([
         "rclone", "copy", DOWNLOAD_DIR, "drive:/kakuyomu_dl",
