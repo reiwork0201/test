@@ -80,9 +80,10 @@ def main():
     with open("kakuyomu/カクヨム.txt", "r", encoding="utf-8") as f:
         urls = [line.strip() for line in f if line.strip()]
 
+    # 初回時、historyが空の場合は全エピソードをダウンロード
     for url in urls:
         print(f"--- 処理開始: {url} ---")
-        last = history.get(url, 0)
+        last = history.get(url, 0)  # 履歴がない場合は 0
         latest = download_new_episodes(url, last)
         history[url] = latest
 
