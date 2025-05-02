@@ -27,9 +27,9 @@ def upload_history_to_drive():
     ], check=True)
 
 def read_history():
-    # HISTORY_FILEがディレクトリでないか確認
-    if os.path.isdir(HISTORY_FILE):  # この部分が誤っていた場合、ディレクトリエラーになる
-        raise IsADirectoryError(f"{HISTORY_FILE}はディレクトリではなくファイルです。")
+    # HISTORY_FILEがファイルか確認
+    if not os.path.isfile(HISTORY_FILE):
+        raise FileNotFoundError(f"{HISTORY_FILE}がファイルとして存在しません。ディレクトリかもしれません。")
 
     history = {}
     if os.path.exists(HISTORY_FILE):
