@@ -37,11 +37,14 @@ def write_history(history):
             f.write(f"{url} | {count}\n")
 
 def fetch_episode_urls(work_url):
+    print(f"Fetching episode URLs for: {work_url}")  # デバッグ用
     res = requests.get(work_url)
     res.raise_for_status()
     soup = BeautifulSoup(res.text, "html.parser")
     episode_links = soup.select("a.widget-episode-title")
-    return [f"https://kakuyomu.jp{a['href']}" for a in episode_links]
+    episode_urls = [f"https://kakuyomu.jp{a['href']}" for a in episode_links]
+    print(f"Found {len(episode_urls)} episode(s).")  # デバッグ用
+    return episode_urls
 
 def fetch_episode_content(episode_url):
     res = requests.get(episode_url)
