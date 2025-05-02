@@ -7,42 +7,48 @@ from bs4 import BeautifulSoup
 
 BASE_URL = "https://kakuyomu.jp"
 DOWNLOAD_DIR = "/tmp/kakuyomu_dl"
-HISTORY_FILE = "/tmp/カクヨムダウンロード経歴.txt"
-REMOTE_HISTORY_PATH = "drive:/カクヨムダウンロード経歴.txt"
+HISTORY_FILE = "kakuyomu/カクヨムダウンロード経歴.txt"
 NOVEL_LIST_FILE = "kakuyomu/カクヨム.txt"
 
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
+# Google Driveからhistoryファイルをダウンロード
 def download_history_from_drive():
-    if not os.path.exists(HISTORY_FILE):
-        subprocess.run(["rclone", "copyto", REMOTE_HISTORY_PATH, HISTORY_FILE], check=False)
+    subprocess.run([
+        "rclone", "copy", "drive:/カクヨムダウンロード経歴.txt", HISTORY_FILE,
+        "--progress"
+    ], check=True)
 
+# Google Driveにhistoryファイルをアップロード
 def upload_history_to_drive():
-    subprocess.run(["rclone", "copyto", HISTORY_FILE, REMOTE_HISTORY_PATH], check=True)
+    subprocess.run([
+        "rclone", "move", HISTORY_FILE, "drive:/カクヨムダウンロード経歴.txt",
+        "--progress"
+    ], check=True)
 
 def read_history():
-    download_history_from_drive()
+    if os.path.isdir(HISTORY_FILE):
+        raise IsADirectoryError(f"{HISTORY_FILE}はディレクトリです。")
+
     history = {}
     if os.path.exists(HISTORY_FILE):
         with open(HISTORY_FILE, encoding="utf-8") as f:
             for line in f:
-                match = re.match(r'(https?://[^\s|]+)\s*\|\s*(\d+)', line.strip())
-                if match:
-                    url, last = match.groups()
-                    history[url.rstrip('/')] = int(last)
+                url, last = line.strip().split(" | ")
+                history[url] = int(last)
     return history
 
 def write_history(history):
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         for url, last in history.items():
-            f.write(f"{url}  |  {last}\n")
-    upload_history_to_drive()
+            f.write(f"{url} | {last}\n")
 
 def get_episode_links(novel_url):
     res = requests.get(novel_url)
     soup = BeautifulSoup(res.text, "html.parser")
     links = soup.select("a.widget-toc-episode")
-    return [BASE_URL + a["href"] for a in links]
+    links_sorted = sorted(links, key=lambda a: a["href"])
+    return [BASE_URL + a["href"] for a in links_sorted]
 
 def download_episode(url):
     res = requests.get(url)
@@ -61,6 +67,7 @@ def get_novel_title(novel_url):
     return soup.select_one("h1.widget-title").text.strip()
 
 def main():
+    download_history_from_drive()
     history = read_history()
 
     with open(NOVEL_LIST_FILE, encoding="utf-8") as f:
@@ -70,12 +77,13 @@ def main():
         print(f"--- 処理開始: {novel_url} ---")
         episode_links = get_episode_links(novel_url)
         last_downloaded = history.get(novel_url, 0)
-        to_download = episode_links[last_downloaded:]
+        total_episodes = len(episode_links)
 
-        if not to_download:
+        if last_downloaded >= total_episodes:
             print("  → 新しい話はありません。スキップします。")
             continue
 
+        to_download = episode_links[last_downloaded:]
         novel_title = sanitize_filename(get_novel_title(novel_url))
         novel_dir = os.path.join(DOWNLOAD_DIR, novel_title)
         os.makedirs(novel_dir, exist_ok=True)
@@ -93,6 +101,7 @@ def main():
         print(f"  → {len(to_download)}話ダウンロード完了")
 
     write_history(history)
+    upload_history_to_drive()
 
     subprocess.run([
         "rclone", "copy", DOWNLOAD_DIR, "drive:/kakuyomu_dl",
