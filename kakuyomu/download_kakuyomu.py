@@ -7,38 +7,44 @@ from bs4 import BeautifulSoup
 
 BASE_URL = "https://kakuyomu.jp"
 DOWNLOAD_DIR = "/tmp/kakuyomu_dl"
-HISTORY_FILE = "kakuyomu/カクヨムダウンロード経歴.txt"
+TMP_HISTORY_FILE = os.path.join(DOWNLOAD_DIR, "カクヨムダウンロード経歴.txt")
+HISTORY_FILE = TMP_HISTORY_FILE  # ローカルでダウンロードした履歴ファイルをそのまま使用
 NOVEL_LIST_FILE = "kakuyomu/カクヨム.txt"
 
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# Google Driveからhistoryファイルをダウンロード
+# Google Driveからhistoryファイルを一時ディレクトリにダウンロード
 def download_history_from_drive():
+    os.makedirs(DOWNLOAD_DIR, exist_ok=True)
     subprocess.run([
-        "rclone", "copy", "drive:/カクヨムダウンロード経歴.txt", HISTORY_FILE,
+        "rclone", "copy", "drive:/カクヨムダウンロード経歴.txt", DOWNLOAD_DIR,
         "--progress"
     ], check=True)
 
+# 履歴ファイルを読み込む
 def read_history():
     history = {}
-    if os.path.exists(HISTORY_FILE):
-        with open(HISTORY_FILE, encoding="utf-8") as f:
+    if os.path.exists(TMP_HISTORY_FILE):
+        with open(TMP_HISTORY_FILE, encoding="utf-8") as f:
             for line in f:
                 url, last = line.strip().split(" | ")
                 history[url] = int(last)
     return history
 
+# 履歴ファイルを書き込む
 def write_history(history):
-    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+    with open(TMP_HISTORY_FILE, "w", encoding="utf-8") as f:
         for url, last in history.items():
             f.write(f"{url} | {last}\n")
 
+# 目次ページからエピソードリンクを取得
 def get_episode_links(novel_url):
     res = requests.get(novel_url)
     soup = BeautifulSoup(res.text, "html.parser")
     links = soup.select("a.widget-toc-episode")
     return [BASE_URL + a["href"] for a in links]
 
+# エピソードをダウンロード
 def download_episode(url):
     res = requests.get(url)
     soup = BeautifulSoup(res.text, "html.parser")
@@ -47,18 +53,19 @@ def download_episode(url):
     episode_id = url.split("/")[-1]
     return f"# {title}\n\n{content}", episode_id
 
+# ファイル名に使用できない文字を除去
 def sanitize_filename(name):
     return re.sub(r'[\\/*?:"<>|]', "", name)
 
+# 小説タイトルを取得
 def get_novel_title(novel_url):
     res = requests.get(novel_url)
     soup = BeautifulSoup(res.text, "html.parser")
     return soup.select_one("h1.widget-title").text.strip()
 
+# メイン処理
 def main():
-    # 履歴ファイルをGoogle Driveから取得
-    download_history_from_drive()
-
+    download_history_from_drive()  # Google Driveから履歴をダウンロード
     history = read_history()
 
     with open(NOVEL_LIST_FILE, encoding="utf-8") as f:
@@ -69,8 +76,6 @@ def main():
         episode_links = get_episode_links(novel_url)
         last_downloaded = history.get(novel_url, 0)
         to_download = episode_links[last_downloaded:]
-
-        print(f"  → 全話数: {len(episode_links)}, 取得済: {last_downloaded}, 今回取得: {len(to_download)}")
 
         if not to_download:
             print("  → 新しい話はありません。スキップします。")
