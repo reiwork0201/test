@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 
 BASE_URL = "https://kakuyomu.jp"
 DOWNLOAD_DIR = "/tmp/kakuyomu_dl"
-HISTORY_FILE = "/tmp/カクヨムダウンロード経歴.txt"  # /tmp/ディレクトリに保存されるように変更
+HISTORY_FILE = "カクヨムダウンロード経歴.txt"  # /tmp/ディレクトリに保存されるように変更
 NOVEL_LIST_FILE = "kakuyomu/カクヨム.txt"
 
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
