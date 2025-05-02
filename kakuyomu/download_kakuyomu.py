@@ -7,7 +7,8 @@ from bs4 import BeautifulSoup
 
 BASE_URL = "https://kakuyomu.jp"
 DOWNLOAD_DIR = "/tmp/kakuyomu_dl"
-HISTORY_FILE = "/tmp/カクヨムダウンロード経歴.txt"  # /tmp/ディレクトリに保存されるように変更
+HISTORY_FILE = "kakuyomu/カクヨムダウンロード経歴.txt"  # ローカルに保存されるように変更
+REMOTE_HISTORY_FILE = "drive:/カクヨムダウンロード経歴.txt"
 NOVEL_LIST_FILE = "kakuyomu/カクヨム.txt"
 
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
@@ -15,21 +16,21 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 # Google Driveからhistoryファイルをダウンロード
 def download_history_from_drive():
     subprocess.run([
-        "rclone", "copy", "drive:/カクヨムダウンロード経歴.txt", HISTORY_FILE,
+        "rclone", "copy", REMOTE_HISTORY_FILE, HISTORY_FILE,
         "--progress"
     ], check=True)
 
 # Google Driveにhistoryファイルをアップロード
 def upload_history_to_drive():
     subprocess.run([
-        "rclone", "move", HISTORY_FILE, "drive:/カクヨムダウンロード経歴.txt",
+        "rclone", "move", HISTORY_FILE, REMOTE_HISTORY_FILE,
         "--progress"
     ], check=True)
 
 def read_history():
-    # HISTORY_FILEがファイルか確認
-    if not os.path.isfile(HISTORY_FILE):
-        raise FileNotFoundError(f"{HISTORY_FILE}がファイルとして存在しません。ディレクトリかもしれません。")
+    # HISTORY_FILEがディレクトリでないか確認
+    if os.path.isdir(HISTORY_FILE):
+        raise IsADirectoryError(f"{HISTORY_FILE}はディレクトリです。")
 
     history = {}
     if os.path.exists(HISTORY_FILE):
@@ -76,8 +77,8 @@ def main():
     for novel_url in novels:
         print(f"--- 処理開始: {novel_url} ---")
         episode_links = get_episode_links(novel_url)
-        last_downloaded = history.get(novel_url, 0)  # 最後にダウンロードしたエピソード
-        to_download = episode_links[last_downloaded:]  # 続きのエピソード
+        last_downloaded = history.get(novel_url, 0)  # 履歴から最終話を取得
+        to_download = episode_links[last_downloaded:]  # 最終話以降をダウンロード対象にする
 
         if not to_download:
             print("  → 新しい話はありません。スキップします。")
@@ -96,10 +97,10 @@ def main():
                 print("  → 300話ごとに1分待機...")
                 time.sleep(60)
 
-        history[novel_url] = last_downloaded + len(to_download)  # ダウンロードした分の更新
+        history[novel_url] = last_downloaded + len(to_download)  # 新しい話数を履歴に更新
         print(f"  → {len(to_download)}話ダウンロード完了")
 
-    write_history(history)
+    write_history(history)  # 履歴ファイルを更新
     upload_history_to_drive()  # 処理後に履歴をGoogle Driveにアップロード
 
     # Google Driveへアップロード
