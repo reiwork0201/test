@@ -29,8 +29,3 @@ jobs:
       - name: Run kakuyomu downloader
         run: |
           python3 kakuyomu/download_kakuyomu.py
-
-      - name: Upload history file to Google Drive
-        run: |
-          # rcloneコマンドでファイルをGoogle Driveのルート直下に上書き
-          rclone move kakuyomu/カクヨムダウンロード経歴.txt drive:/ --transfers=1 --progress
