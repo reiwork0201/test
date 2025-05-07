@@ -1,103 +1,155 @@
-import requests
 import os
 import re
 import time
+import requests
+import subprocess
 from bs4 import BeautifulSoup
 
-def get_episode_links(novel_url):
-    """目次ページのHTMLを正規表現で解析し、各話のURLを抽出"""
+BASE_URL = "https://kakuyomu.jp"
+HISTORY_FILE = "カクヨムダウンロード経歴.txt"
+LOCAL_HISTORY_PATH = f"/tmp/{HISTORY_FILE}"
+REMOTE_HISTORY_PATH = f"drive:{HISTORY_FILE}"
+DOWNLOAD_DIR_BASE = "/tmp/kakuyomu_dl"
+
+# 初期ディレクトリ作成
+os.makedirs(DOWNLOAD_DIR_BASE, exist_ok=True)
+
+
+def load_history():
+    """履歴ファイルを読み込んで辞書形式で返す"""
+    if not os.path.exists(LOCAL_HISTORY_PATH):
+        subprocess.run(['rclone', 'copyto', REMOTE_HISTORY_PATH, LOCAL_HISTORY_PATH], check=False)
+
+    history = {}
+    if os.path.exists(LOCAL_HISTORY_PATH):
+        with open(LOCAL_HISTORY_PATH, 'r', encoding='utf-8') as f:
+            for line in f:
+                match = re.match(r'(https?://[^\s|]+)\s*\|\s*(\d+)', line.strip())
+                if match:
+                    url, last = match.groups()
+                    history[url] = int(last)
+    return history
+
+
+def save_history(history):
+    """履歴をローカルとGoogle Driveに保存"""
+    with open(LOCAL_HISTORY_PATH, 'w', encoding='utf-8') as f:
+        for url, last in history.items():
+            f.write(f'{url}  |  {last}\n')
+    subprocess.run(['rclone', 'copyto', LOCAL_HISTORY_PATH, REMOTE_HISTORY_PATH], check=True)
+
+
+def get_novel_title(novel_url):
+    """<title>タグから小説タイトルを取得"""
     response = requests.get(novel_url)
     response.raise_for_status()
-    html = response.text
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    title_tag = soup.find("title")
+    if title_tag:
+        title_text = title_tag.text.strip()
+        title_text = re.sub(r'\s*[-ー]?\s*カクヨム.*$', '', title_text)
+        return title_text
+    else:
+        return "タイトルなし"
+
+
+def get_episode_links(novel_url):
+    """ページ内のJSON風データからエピソードURLを抽出（正規表現使用）"""
+    response = requests.get(novel_url)
+    response.raise_for_status()
+    body = response.text
 
     print("小説情報を取得中...")
 
-    # "__typename":"Episode" ブロックを正規表現で抽出
-    ep_pattern = r'"__typename":"Episode","id":"(.*?)","title":"(.*?)",'
-    ep_matches = re.findall(ep_pattern, html)
+    # 各エピソードのURLを取得
+    ep_pattern = r'"__typename":"Episode","id":"(.*?)","title":"(.*?)"'
+    matches = re.findall(ep_pattern, body)
 
-    if not ep_matches:
+    if not matches:
         print("指定されたページからエピソード情報を取得できませんでした。")
         return []
 
-    # 各エピソードURLを作成
+    # ベースURLを抽出
+    base_url_match = re.match(r"(https://kakuyomu.jp/works/\d+)", novel_url)
+    if not base_url_match:
+        print("小説のURLからベースURLを抽出できませんでした。")
+        return []
+
+    base_url = base_url_match.group(1)
+
     episode_links = []
-    for episode_id, title in ep_matches:
-        episode_url = f"{novel_url}/episodes/{episode_id}"
-        episode_links.append((episode_url, title.strip()))
+    for ep_id, ep_title in matches:
+        full_url = f"{base_url}/episodes/{ep_id}"
+        episode_links.append((full_url, ep_title))
 
     print(f"{len(episode_links)} 話の目次情報を取得しました。")
     return episode_links
 
 
-def download_episode(url, title, index, novel_title):
-    """各話の本文を取得して保存"""
-    response = requests.get(url)
+def download_episode(episode_url, title, novel_title, index):
+    """1話分をダウンロードしてファイルに保存"""
+    response = requests.get(episode_url)
     response.raise_for_status()
-    html = response.text
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(response.text, "html.parser")
+    body = soup.select_one("div.widget-episodeBody").get_text("\n", strip=True)
 
-    # 本文抽出
-    text_area = soup.find("div", {"id": "content-main"})
-    if not text_area:
-        print(f"{index} 話の本文が見つかりませんでした。")
-        return
+    folder_num = (index // 999) + 1
+    folder_name = f"{folder_num:03d}"
+    safe_novel_title = re.sub(r'[\\/*?:"<>|]', '_', novel_title)
+    folder_path = os.path.join(DOWNLOAD_DIR_BASE, safe_novel_title, folder_name)
+    os.makedirs(folder_path, exist_ok=True)
 
-    paragraphs = text_area.find_all("p")
-    if not paragraphs:
-        print(f"{index} 話の本文が見つかりませんでした。")
-        return
+    file_name = f"{index + 1:03d}.txt"
+    file_path = os.path.join(folder_path, file_name)
 
-    text = "\r\n".join(p.get_text(strip=True) for p in paragraphs)
-
-    folder_index = (index - 1) // 999 + 1  # サブフォルダ番号（999話ごと）
-    subfolder_name = f"{folder_index:03}"
-    subfolder_path = os.path.join(novel_title, subfolder_name)
-    os.makedirs(subfolder_path, exist_ok=True)
-
-    filename = os.path.join(subfolder_path, f"{index:03}.txt")
-    if os.path.exists(filename):
-        print(f"{filename} は既に存在します。スキップします。")
-        return
-
-    with open(filename, "w", encoding="utf-8") as f:
-        f.write(f"【タイトル】{title}\r\n\r\n{text}")
-
-    print(f"{filename} に保存しました。")
-    time.sleep(0.01)  # 軽負荷
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(body)
+    time.sleep(1)
 
 
-def main():
-    print("kakudlpy ver1.1 2025/03/07 (c) INOUE, masahiro")
+def download_novels(urls, history):
+    for novel_url in urls:
+        try:
+            print(f'\n--- 処理開始: {novel_url} ---')
 
-    while True:
-        novel_url = input("カクヨム作品トップページのURLを入力してください: ").strip()
-        if re.match(r'https://kakuyomu.jp/works/\d{19,20}', novel_url):
-            break
-        else:
-            print("正しいカクヨム作品トップページURLを入力してください。")
+            novel_title = get_novel_title(novel_url)
+            novel_title = re.sub(r'[\\/*?:"<>|]', '', novel_title).strip()
 
-    response = requests.get(novel_url)
-    response.raise_for_status()
-    html = response.text
+            episode_links = get_episode_links(novel_url)
 
-    title_match = re.search(r'<title>(.*?) - カクヨム</title>', html)
-    if title_match:
-        novel_title = re.sub(r'[\\/:*?"<>|]', '', title_match.group(1).strip())
-    else:
-        novel_title = "無題"
+            download_from = history.get(novel_url, 0)
+            new_max = download_from
 
-    print(f"取得した小説名: {novel_title}")
-    os.makedirs(novel_title, exist_ok=True)
+            for i, (episode_url, episode_title) in enumerate(episode_links):
+                if i + 1 <= download_from:
+                    continue
 
-    episode_links = get_episode_links(novel_url)
-    if not episode_links:
-        return
+                print(f"{i + 1:03d}_{episode_title} downloading...")
+                download_episode(episode_url, episode_title, novel_title, i)
+                new_max = i + 1
 
-    for i, (url, title) in enumerate(episode_links, start=1):
-        download_episode(url, title, i, novel_title)
+            history[novel_url] = new_max
 
-    print(f"{len(episode_links)} 話のエピソードを取得しました。")
+        except Exception as e:
+            print(f"エラー発生: {novel_url} → {e}")
+            continue
 
-if __name__ == '__main__':
-    main()
+
+# ==== メイン処理 ====
+
+if __name__ == "__main__":
+    script_dir = os.path.dirname(__file__)
+    url_file_path = os.path.join(script_dir, 'カクヨム.txt')
+
+    with open(url_file_path, 'r', encoding='utf-8') as f:
+        urls = [line.strip().rstrip('/') for line in f if line.strip().startswith('http')]
+
+    history = load_history()
+    download_novels(urls, history)
+    save_history(history)
+
+    subprocess.run([
+        'rclone', 'copy', '/tmp/kakuyomu_dl', 'drive:',
+        '--transfers=4', '--checkers=8', '--fast-list'
+    ], check=True)
