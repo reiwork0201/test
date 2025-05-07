@@ -55,35 +55,29 @@ def get_novel_title(novel_url):
 
 
 def get_episode_links(novel_url):
-    """ページ内のJSON風データからエピソードURLを抽出（正規表現使用）"""
+    """目次ページの解析と各話のURL取得"""
     response = requests.get(novel_url)
     response.raise_for_status()
-    body = response.text
-
-    print("小説情報を取得中...")
-
-    # 各エピソードのURLを取得
-    ep_pattern = r'"__typename":"Episode","id":"(.*?)","title":"(.*?)"'
-    matches = re.findall(ep_pattern, body)
-
-    if not matches:
-        print("指定されたページからエピソード情報を取得できませんでした。")
-        return []
-
-    # ベースURLを抽出
+    soup = BeautifulSoup(response.text, "html.parser")
+    links = soup.select("a.widget-toc-episode")
+    
+    episode_links = []
+    
+    # ベースURLを抽出（例：https://kakuyomu.jp/works/16817139555994570519）
     base_url_match = re.match(r"(https://kakuyomu.jp/works/\d+)", novel_url)
     if not base_url_match:
         print("小説のURLからベースURLを抽出できませんでした。")
         return []
-
+    
     base_url = base_url_match.group(1)
 
-    episode_links = []
-    for ep_id, ep_title in matches:
-        full_url = f"{base_url}/episodes/{ep_id}"
-        episode_links.append((full_url, ep_title))
+    # 各エピソードのURLを作成してリストに追加
+    for link in links:
+        episode_id = link["href"].split("/")[-1]  # 例：16817139555994608102
+        episode_url = f"{base_url}/episodes/{episode_id}"
+        episode_links.append((episode_url, link.text.strip()))
 
-    print(f"{len(episode_links)} 話の目次情報を取得しました。")
+    print(f"取得したエピソードURL: {episode_links}")  # デバッグ用に出力
     return episode_links
 
 
@@ -94,9 +88,10 @@ def download_episode(episode_url, title, novel_title, index):
     soup = BeautifulSoup(response.text, "html.parser")
     body = soup.select_one("div.widget-episodeBody").get_text("\n", strip=True)
 
+    # 小説タイトルを30文字以内に制限
+    safe_novel_title = re.sub(r'[\\/*?:"<>|]', '_', novel_title)[:30]  # 最大30文字に制限
     folder_num = (index // 999) + 1
     folder_name = f"{folder_num:03d}"
-    safe_novel_title = re.sub(r'[\\/*?:"<>|]', '_', novel_title)
     folder_path = os.path.join(DOWNLOAD_DIR_BASE, safe_novel_title, folder_name)
     os.makedirs(folder_path, exist_ok=True)
 
