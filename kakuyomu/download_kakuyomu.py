@@ -40,11 +40,18 @@ def save_history(history):
 
 
 def get_novel_title(novel_url):
-    """小説タイトルを取得"""
+    """<title>タグから小説タイトルを取得"""
     response = requests.get(novel_url)
     response.raise_for_status()
     soup = BeautifulSoup(response.text, "html.parser")
-    return soup.select_one("h1.widget-title").text.strip()
+
+    title_tag = soup.find("title")
+    if title_tag:
+        title_text = title_tag.text.strip()
+        title_text = re.sub(r'\s*[-ー]?\s*カクヨム.*$', '', title_text)
+        return title_text
+    else:
+        return "タイトルなし"
 
 
 def get_episode_links(novel_url):
@@ -82,14 +89,11 @@ def download_novels(urls, history):
         try:
             print(f'\n--- 処理開始: {novel_url} ---')
 
-            # 小説タイトル取得
             novel_title = get_novel_title(novel_url)
             novel_title = re.sub(r'[\\/*?:"<>|]', '', novel_title).strip()
 
-            # 各話URL取得
             episode_links = get_episode_links(novel_url)
 
-            # 既に取得済みの話数を確認
             download_from = history.get(novel_url, 0)
             new_max = download_from
 
@@ -101,7 +105,6 @@ def download_novels(urls, history):
                 download_episode(episode_url, episode_title, novel_title, i)
                 new_max = i + 1
 
-            # 履歴更新
             history[novel_url] = new_max
 
         except Exception as e:
@@ -109,20 +112,20 @@ def download_novels(urls, history):
             continue
 
 
-# URL一覧の読み込み（スクリプトと同じディレクトリにあるファイルを参照）
-script_dir = os.path.dirname(__file__)
-url_file_path = os.path.join(script_dir, 'カクヨム.txt')
-with open(url_file_path, 'r', encoding='utf-8') as f:
-    urls = [line.strip().rstrip('/') for line in f if line.strip().startswith('http')]
+# ==== メイン処理 ====
 
-# 履歴の読み込み
-history = load_history()
+if __name__ == "__main__":
+    script_dir = os.path.dirname(__file__)
+    url_file_path = os.path.join(script_dir, 'カクヨム.txt')
 
-# 小説のダウンロード
-download_novels(urls, history)
+    with open(url_file_path, 'r', encoding='utf-8') as f:
+        urls = [line.strip().rstrip('/') for line in f if line.strip().startswith('http')]
 
-# 履歴ファイルの保存
-save_history(history)
+    history = load_history()
+    download_novels(urls, history)
+    save_history(history)
 
-# Google Driveへアップロード
-subprocess.run(['rclone', 'copy', '/tmp/kakuyomu_dl', 'drive:', '--transfers=4', '--checkers=8', '--fast-list'], check=True)
+    subprocess.run([
+        'rclone', 'copy', '/tmp/kakuyomu_dl', 'drive:',
+        '--transfers=4', '--checkers=8', '--fast-list'
+    ], check=True)
