@@ -62,6 +62,9 @@ def get_episode_links(novel_url):
     links = soup.select("a.widget-toc-episode")
     return [(BASE_URL + link["href"], link.text.strip()) for link in links]
 
+    episode_links = get_episode_links(novel_url)
+    print(f"{len(episode_links)} 話を取得")
+
 
 def download_episode(episode_url, title, novel_title, index):
     """1話分をダウンロードしてファイルに保存"""
