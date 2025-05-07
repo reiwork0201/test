@@ -14,7 +14,6 @@ DOWNLOAD_DIR_BASE = "/tmp/kakuyomu_dl"
 # 初期ディレクトリ作成
 os.makedirs(DOWNLOAD_DIR_BASE, exist_ok=True)
 
-
 def load_history():
     """履歴ファイルを読み込んで辞書形式で返す"""
     if not os.path.exists(LOCAL_HISTORY_PATH):
@@ -30,14 +29,12 @@ def load_history():
                     history[url] = int(last)
     return history
 
-
 def save_history(history):
     """履歴をローカルとGoogle Driveに保存"""
     with open(LOCAL_HISTORY_PATH, 'w', encoding='utf-8') as f:
         for url, last in history.items():
             f.write(f'{url}  |  {last}\n')
     subprocess.run(['rclone', 'copyto', LOCAL_HISTORY_PATH, REMOTE_HISTORY_PATH], check=True)
-
 
 def get_novel_title(novel_url):
     """<title>タグから小説タイトルを取得"""
@@ -53,39 +50,31 @@ def get_novel_title(novel_url):
     else:
         return "タイトルなし"
 
-
 def get_episode_links(novel_url):
-    """ページ内のJSON風データからエピソードURLを抽出（正規表現使用）"""
+    """目次ページの解析と各話のURL取得"""
     response = requests.get(novel_url)
     response.raise_for_status()
-    body = response.text
-
-    print("小説情報を取得中...")
-
-    # 各エピソードのURLを取得
-    ep_pattern = r'"__typename":"Episode","id":"(.*?)","title":"(.*?)"'
-    matches = re.findall(ep_pattern, body)
-
-    if not matches:
-        print("指定されたページからエピソード情報を取得できませんでした。")
-        return []
-
-    # ベースURLを抽出
+    soup = BeautifulSoup(response.text, "html.parser")
+    links = soup.select("a.widget-toc-episode")
+    
+    episode_links = []
+    
+    # ベースURLを抽出（例：https://kakuyomu.jp/works/16817139555994570519）
     base_url_match = re.match(r"(https://kakuyomu.jp/works/\d+)", novel_url)
     if not base_url_match:
         print("小説のURLからベースURLを抽出できませんでした。")
         return []
-
+    
     base_url = base_url_match.group(1)
 
-    episode_links = []
-    for ep_id, ep_title in matches:
-        full_url = f"{base_url}/episodes/{ep_id}"
-        episode_links.append((full_url, ep_title))
+    # 各エピソードのURLを作成してリストに追加
+    for link in links:
+        episode_id = link["href"].split("/")[-1]  # 例：16817139555994608102
+        episode_url = f"{base_url}/episodes/{episode_id}"
+        episode_links.append((episode_url, link.text.strip()))
 
-    print(f"{len(episode_links)} 話の目次情報を取得しました。")
+    print(f"取得したエピソードURL: {episode_links}")  # デバッグ用に出力
     return episode_links
-
 
 def download_episode(episode_url, title, novel_title, index):
     """1話分をダウンロードしてファイルに保存"""
@@ -94,9 +83,10 @@ def download_episode(episode_url, title, novel_title, index):
     soup = BeautifulSoup(response.text, "html.parser")
     body = soup.select_one("div.widget-episodeBody").get_text("\n", strip=True)
 
+    # 小説タイトルが長すぎる場合、短縮する
+    safe_novel_title = re.sub(r'[\\/*?:"<>|]', '_', novel_title)[:100]  # 最大100文字に制限
     folder_num = (index // 999) + 1
     folder_name = f"{folder_num:03d}"
-    safe_novel_title = re.sub(r'[\\/*?:"<>|]', '_', novel_title)
     folder_path = os.path.join(DOWNLOAD_DIR_BASE, safe_novel_title, folder_name)
     os.makedirs(folder_path, exist_ok=True)
 
@@ -106,7 +96,6 @@ def download_episode(episode_url, title, novel_title, index):
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(body)
     time.sleep(1)
-
 
 def download_novels(urls, history):
     for novel_url in urls:
@@ -129,12 +118,16 @@ def download_novels(urls, history):
                 download_episode(episode_url, episode_title, novel_title, i)
                 new_max = i + 1
 
+                # 300話ごとに30秒の休憩
+                if (i + 1) % 300 == 0:
+                    print(f"300話ダウンロード完了。30秒間の休憩中...")
+                    time.sleep(30)
+
             history[novel_url] = new_max
 
         except Exception as e:
             print(f"エラー発生: {novel_url} → {e}")
             continue
-
 
 # ==== メイン処理 ====
 
