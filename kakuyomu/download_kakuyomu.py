@@ -83,10 +83,9 @@ def download_episode(episode_url, title, novel_title, index):
     soup = BeautifulSoup(response.text, "html.parser")
     body = soup.select_one("div.widget-episodeBody").get_text("\n", strip=True)
 
-    # 小説タイトルが長すぎる場合、短縮する
-    safe_novel_title = re.sub(r'[\\/*?:"<>|]', '_', novel_title)[:100]  # 最大100文字に制限
     folder_num = (index // 999) + 1
     folder_name = f"{folder_num:03d}"
+    safe_novel_title = re.sub(r'[\\/*?:"<>|]', '_', novel_title)
     folder_path = os.path.join(DOWNLOAD_DIR_BASE, safe_novel_title, folder_name)
     os.makedirs(folder_path, exist_ok=True)
 
@@ -118,9 +117,9 @@ def download_novels(urls, history):
                 download_episode(episode_url, episode_title, novel_title, i)
                 new_max = i + 1
 
-                # 300話ごとに30秒の休憩
+                # 300話ごとに30秒休憩を挟む
                 if (i + 1) % 300 == 0:
-                    print(f"300話ダウンロード完了。30秒間の休憩中...")
+                    print("300話処理完了。30秒間の休憩...")
                     time.sleep(30)
 
             history[novel_url] = new_max
