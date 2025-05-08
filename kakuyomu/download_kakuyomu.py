@@ -96,7 +96,7 @@ def download_episode(episode_url, title, novel_title, index):
 
     folder_num = (index // 999) + 1
     folder_name = f"{folder_num:03d}"
-    safe_novel_title = re.sub(r'[\\/*?:"<>|]', '_', novel_title)
+    safe_novel_title = re.sub(r'[\\/*?:"<>|]', '_', novel_title[:30])
     folder_path = os.path.join(DOWNLOAD_DIR_BASE, safe_novel_title, folder_name)
     os.makedirs(folder_path, exist_ok=True)
 
